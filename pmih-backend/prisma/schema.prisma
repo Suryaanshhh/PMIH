@@ -1,0 +1,745 @@
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector"), pgcrypto]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum ProjectStatus {
+  PROPOSED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum HealthStatus {
+  GREEN
+  AMBER
+  RED
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  PARENTAL
+  UNPAID
+  PUBLIC_HOLIDAY
+}
+
+enum LeaveStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum PriorityLevel {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+  CRITICAL
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  BLOCKED
+  DONE
+}
+
+enum DeliverableStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+}
+
+enum MilestoneStatus {
+  PLANNED
+  ON_TRACK
+  AT_RISK
+  ACHIEVED
+  MISSED
+}
+
+enum DeadlineEntityType {
+  TASK
+  DELIVERABLE
+  MILESTONE
+  CHANGE_REQUEST
+}
+
+enum SourceSystem {
+  OUTLOOK
+  TEAMS
+  GOOGLE_SHEETS
+  EXCEL
+  CHROME
+  UPLOAD
+  CALL_NOTE
+}
+
+enum AccessClassification {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum CommunicationChannel {
+  EMAIL
+  CHAT
+  TRANSCRIPT
+  NOTE
+}
+
+enum RiskLikelihood {
+  VERY_LOW
+  LOW
+  MEDIUM
+  HIGH
+  VERY_HIGH
+}
+
+enum RiskImpact {
+  NEGLIGIBLE
+  MINOR
+  MODERATE
+  MAJOR
+  CRITICAL
+}
+
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+  BLOCKER
+}
+
+enum IssueStatus {
+  OPEN
+  INVESTIGATING
+  WAITING_ON_EXTERNAL
+  RESOLVED
+  CLOSED
+}
+
+enum DependencyType {
+  FINISH_TO_START
+  START_TO_START
+  FINISH_TO_FINISH
+  START_TO_FINISH
+}
+
+enum ApprovalStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SyncJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIAL_SUCCESS
+}
+
+enum AuditEventType {
+  CREATE
+  UPDATE
+  DELETE
+  EXTRACTION_OVERRIDE
+  SYNC_EXECUTION
+}
+
+// ==========================================
+// MODULE 1: PORTFOLIO & ORGANIZATIONAL STRUCTURE
+// ==========================================
+
+model Client {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  industry    String?  @db.VarChar(100)
+  keyContacts Json     @default("[]") @map("key_contacts")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  programs      Program[]
+  projects      Project[]
+  tasks         Task[]
+  sourceRecords SourceRecord[]
+  commitments   Commitment[]
+
+  @@index([name])
+  @@map("clients")
+}
+
+model Program {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId       String   @map("client_id") @db.Uuid
+  name           String   @db.VarChar(255)
+  description    String?  @db.Text
+  strategicGoals String?  @map("strategic_goals") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@index([clientId])
+  @@map("programs")
+}
+
+model Project {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId      String        @map("client_id") @db.Uuid
+  programId     String?       @map("program_id") @db.Uuid
+  name          String        @db.VarChar(255)
+  description   String?       @db.Text
+  phase         String?       @db.VarChar(100)
+  status        ProjectStatus @default(PROPOSED)
+  healthStatus  HealthStatus  @default(GREEN) @map("health_status")
+  startDate     DateTime?     @map("start_date") @db.Date
+  targetEndDate DateTime?     @map("target_end_date") @db.Date
+  actualEndDate DateTime?     @map("actual_end_date") @db.Date
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client              Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  program             Program?             @relation(fields: [programId], references: [id], onDelete: SetNull)
+  resourceAllocations ResourceAllocation[]
+  tasks               Task[]
+  milestones          Milestone[]
+  deliverables        Deliverable[]
+  statusUpdates       StatusUpdate[]
+  sourceRecords       SourceRecord[]
+  risks               Risk[]
+  issues              Issue[]
+  changeRequests      ChangeRequest[]
+
+  @@index([clientId])
+  @@index([programId])
+  @@index([status, healthStatus])
+  @@map("projects")
+}
+
+// ==========================================
+// MODULE 2: RESOURCE & CAPACITY MANAGEMENT
+// ==========================================
+
+model Resource {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullName          String   @map("full_name") @db.VarChar(255)
+  email             String   @unique @db.VarChar(255)
+  role              String   @db.VarChar(100)
+  primaryDepartment String   @map("primary_department") @db.VarChar(100)
+  hourlyCost        Decimal? @map("hourly_cost") @db.Decimal(12, 2)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  skills                 ResourceSkill[]
+  availability           ResourceAvailability?
+  allocations            ResourceAllocation[]
+  leaves                 LeaveOrAbsence[]
+  tasksOwned             Task[]                 @relation("TaskAccountableOwner")
+  subtasksAssigned       Subtask[]              @relation("SubtaskAssignedResource")
+  statusUpdatesAuthored   StatusUpdate[]        @relation("StatusUpdateAuthor")
+  decisionsMade          Decision[]             @relation("DecisionMaker")
+  commitmentsMade        Commitment[]           @relation("CommitmentResource")
+  actionItemsAssigned    ActionItem[]           @relation("ActionItemAssignee")
+  risksOwned             Risk[]                 @relation("RiskOwner")
+  issuesOwned            Issue[]                @relation("IssueOwner")
+  changeRequestsApproved ChangeRequest[]        @relation("ChangeRequestApprover")
+
+  @@index([email])
+  @@index([role, primaryDepartment])
+  @@map("resources")
+}
+
+model ResourceSkill {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId       String   @map("resource_id") @db.Uuid
+  skillName        String   @map("skill_name") @db.VarChar(100)
+  proficiencyLevel String   @map("proficiency_level") @db.VarChar(50)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, skillName])
+  @@index([skillName])
+  @@map("resource_skills")
+}
+
+model ResourceAvailability {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId              String   @unique @map("resource_id") @db.Uuid
+  weeklyCapacityHours     Decimal  @default(40.00) @map("weekly_capacity_hours") @db.Decimal(5, 2)
+  timezone                String   @default("Asia/Kolkata") @db.VarChar(50)
+  maxSimultaneousProjects Int      @default(3) @map("max_simultaneous_projects")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@map("resource_availabilities")
+}
+
+model ResourceAllocation {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId          String   @map("resource_id") @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  allocatedPercentage Decimal  @map("allocated_percentage") @db.Decimal(5, 2)
+  plannedEffortHours  Decimal  @map("planned_effort_hours") @db.Decimal(8, 2)
+  startDate           DateTime @map("start_date") @db.Date
+  endDate             DateTime @map("end_date") @db.Date
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([resourceId])
+  @@index([projectId])
+  @@index([startDate, endDate])
+  @@map("resource_allocations")
+}
+
+model LeaveOrAbsence {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId String      @map("resource_id") @db.Uuid
+  startDate  DateTime    @map("start_date") @db.Date
+  endDate    DateTime    @map("end_date") @db.Date
+  leaveType  LeaveType   @map("leave_type")
+  status     LeaveStatus @default(REQUESTED)
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([resourceId])
+  @@index([startDate, endDate])
+  @@map("leaves_or_absences")
+}
+
+// ==========================================
+// MODULE 3: WORK EXECUTION & MILESTONES
+// ==========================================
+
+model Task {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId            String        @map("project_id") @db.Uuid
+  clientId             String?       @map("client_id") @db.Uuid
+  title                String        @db.VarChar(255)
+  description          String?       @db.Text
+  priority             PriorityLevel @default(MEDIUM)
+  status               TaskStatus    @default(BACKLOG)
+  accountableOwnerId   String        @map("accountable_owner_id") @db.Uuid
+  estimatedEffortHours Decimal?      @map("estimated_effort_hours") @db.Decimal(8, 2)
+  startDate            DateTime?     @map("start_date") @db.Date
+  dueDate              DateTime?     @map("due_date") @db.Date
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project              Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client               Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  accountableOwner     Resource      @relation("TaskAccountableOwner", fields: [accountableOwnerId], references: [id], onDelete: Restrict)
+  subtasks             Subtask[]
+  statusUpdates        StatusUpdate[]
+  commitments          Commitment[]
+  predecessorInDeps    Dependency[]  @relation("DependencyPredecessor")
+  successorInDeps      Dependency[]  @relation("DependencySuccessor")
+  actionItemsConverted ActionItem[]
+
+  @@index([projectId, status])
+  @@index([clientId])
+  @@index([accountableOwnerId])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+model Subtask {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId             String     @map("task_id") @db.Uuid
+  title              String     @db.VarChar(255)
+  status             TaskStatus @default(TODO)
+  assignedResourceId String?    @map("assigned_resource_id") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  task             Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assignedResource Resource? @relation("SubtaskAssignedResource", fields: [assignedResourceId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([assignedResourceId])
+  @@map("subtasks")
+}
+
+model Milestone {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId      String          @map("project_id") @db.Uuid
+  title          String          @db.VarChar(255)
+  targetDate     DateTime        @map("target_date") @db.Date
+  status         MilestoneStatus @default(PLANNED)
+  completionDate DateTime?       @map("completion_date") @db.Date
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliverables Deliverable[]
+
+  @@index([projectId, targetDate])
+  @@map("milestones")
+}
+
+model Deliverable {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId   String            @map("project_id") @db.Uuid
+  milestoneId String?           @map("milestone_id") @db.Uuid
+  name        String            @db.VarChar(255)
+  description String?           @db.Text
+  status      DeliverableStatus @default(NOT_STARTED)
+  dueDate     DateTime?         @map("due_date") @db.Date
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  milestone Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([milestoneId])
+  @@map("deliverables")
+}
+
+model Deadline {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType     DeadlineEntityType @map("entity_type")
+  entityId       String             @map("entity_id") @db.Uuid
+  constraintDate DateTime           @map("constraint_date") @db.Date
+  description    String?            @db.Text
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([entityType, entityId])
+  @@index([constraintDate])
+  @@map("deadlines")
+}
+
+model StatusUpdate {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String       @map("project_id") @db.Uuid
+  taskId           String?      @map("task_id") @db.Uuid
+  authorResourceId String       @map("author_resource_id") @db.Uuid
+  summaryText      String       @map("summary_text") @db.Text
+  healthIndicator  HealthStatus @map("health_indicator")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  author  Resource @relation("StatusUpdateAuthor", fields: [authorResourceId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@index([taskId])
+  @@index([authorResourceId])
+  @@map("status_updates")
+}
+
+// ==========================================
+// MODULE 4: COMMUNICATIONS, EVIDENCE & LINEAGE
+// ==========================================
+
+model SourceRecord {
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceSystem           SourceSystem         @map("source_system")
+  sourceRecordId         String               @map("source_record_id") @db.VarChar(255)
+  sourceUrl              String?              @map("source_url") @db.Text
+  authorSender           String?              @map("author_sender") @db.VarChar(255)
+  recipientsParticipants Json                 @default("[]") @map("recipients_participants")
+  sourceTimestamp        DateTime?            @map("source_timestamp") @db.Timestamptz(6)
+  ingestionTimestamp     DateTime             @default(now()) @map("ingestion_timestamp") @db.Timestamptz(6)
+  relevantExcerpt        String?              @map("relevant_excerpt") @db.Text
+  clientId               String?              @map("client_id") @db.Uuid
+  projectId              String?              @map("project_id") @db.Uuid
+  extractionConfidence   Float?               @map("extraction_confidence")
+  accessClassification   AccessClassification @default(INTERNAL) @map("access_classification")
+  contentHash            String               @unique @map("content_hash") @db.VarChar(64)
+  originalMetadata       Json                 @default("{}") @map("original_metadata")
+  embedding              Unsupported("vector(1536)")?
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client         Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  communications Communication[]
+  meetings       Meeting[]
+  documents      Document[]
+  decisions      Decision[]
+  commitments    Commitment[]
+  actionItems    ActionItem[]
+  auditEvents    AuditEvent[]
+
+  @@index([clientId])
+  @@index([projectId])
+  @@index([sourceSystem, sourceRecordId])
+  @@index([ingestionTimestamp(sort: Desc)])
+  @@map("source_records")
+}
+
+model Communication {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceRecordId String               @map("source_record_id") @db.Uuid
+  channelType    CommunicationChannel @map("channel_type")
+  subject        String?              @db.VarChar(500)
+  content        String               @db.Text
+  sentAt         DateTime             @map("sent_at") @db.Timestamptz(6)
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceRecord SourceRecord @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([sourceRecordId])
+  @@index([sentAt(sort: Desc)])
+  @@map("communications")
+}
+
+model Meeting {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceRecordId String    @map("source_record_id") @db.Uuid
+  title          String    @db.VarChar(255)
+  startTime      DateTime  @map("start_time") @db.Timestamptz(6)
+  endTime        DateTime  @map("end_time") @db.Timestamptz(6)
+  attendees      Json      @default("[]")
+  transcriptText String?   @map("transcript_text") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceRecord SourceRecord @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+  commitments  Commitment[]
+  actionItems  ActionItem[]
+
+  @@index([sourceRecordId])
+  @@index([startTime(sort: Desc)])
+  @@map("meetings")
+}
+
+model Document {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceRecordId String   @map("source_record_id") @db.Uuid
+  fileName       String   @map("file_name") @db.VarChar(255)
+  fileType       String   @map("file_type") @db.VarChar(100)
+  filePathOrUrl  String   @map("file_path_or_url") @db.Text
+  parsedContent  String?  @map("parsed_content") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceRecord SourceRecord @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([sourceRecordId])
+  @@map("documents")
+}
+
+model Decision {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceRecordId          String    @map("source_record_id") @db.Uuid
+  description             String    @db.Text
+  decisionMakerResourceId String?   @map("decision_maker_resource_id") @db.Uuid
+  impactSummary           String?   @map("impact_summary") @db.Text
+  dateDecided             DateTime  @default(now()) @map("date_decided") @db.Date
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceRecord          SourceRecord @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+  decisionMakerResource Resource?    @relation("DecisionMaker", fields: [decisionMakerResourceId], references: [id], onDelete: SetNull)
+
+  @@index([sourceRecordId])
+  @@index([decisionMakerResourceId])
+  @@map("decisions")
+}
+
+model Commitment {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceRecordId        String    @map("source_record_id") @db.Uuid
+  taskId                String?   @map("task_id") @db.Uuid
+  meetingId             String?   @map("meeting_id") @db.Uuid
+  clientId              String?   @map("client_id") @db.Uuid
+  resourceId            String?   @map("resource_id") @db.Uuid
+  description           String    @db.Text
+  targetFulfillmentDate DateTime? @map("target_fulfillment_date") @db.Date
+  status                String    @default("PENDING") @db.VarChar(50)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceRecord SourceRecord @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  meeting      Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  resource     Resource?    @relation("CommitmentResource", fields: [resourceId], references: [id], onDelete: SetNull)
+
+  @@index([sourceRecordId])
+  @@index([resourceId])
+  @@index([clientId])
+  @@index([taskId])
+  @@map("commitments")
+}
+
+model ActionItem {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  meetingId          String?   @map("meeting_id") @db.Uuid
+  sourceRecordId     String    @map("source_record_id") @db.Uuid
+  description        String    @db.Text
+  assignedResourceId String    @map("assigned_resource_id") @db.Uuid
+  dueDate            DateTime? @map("due_date") @db.Date
+  convertedToTaskId  String?   @map("converted_to_task_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  meeting          Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  sourceRecord     SourceRecord @relation(fields: [sourceRecordId], references: [id], onDelete: Cascade)
+  assignedResource Resource     @relation("ActionItemAssignee", fields: [assignedResourceId], references: [id], onDelete: Restrict)
+  convertedToTask  Task?        @relation(fields: [convertedToTaskId], references: [id], onDelete: SetNull)
+
+  @@index([sourceRecordId])
+  @@index([assignedResourceId])
+  @@index([meetingId])
+  @@map("action_items")
+}
+
+// ==========================================
+// MODULE 5: GOVERNANCE, SCOPE & RISK
+// ==========================================
+
+model Risk {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId       String         @map("project_id") @db.Uuid
+  description     String         @db.Text
+  likelihood      RiskLikelihood @default(MEDIUM)
+  impact          RiskImpact     @default(MODERATE)
+  mitigationPlan  String?        @map("mitigation_plan") @db.Text
+  ownerResourceId String         @map("owner_resource_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ownerResource Resource @relation("RiskOwner", fields: [ownerResourceId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, likelihood, impact])
+  @@index([ownerResourceId])
+  @@map("risks")
+}
+
+model Issue {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId       String        @map("project_id") @db.Uuid
+  description     String        @db.Text
+  severity        IssueSeverity @default(MEDIUM)
+  status          IssueStatus   @default(OPEN)
+  blockerAgeDays  Int           @default(0) @map("blocker_age_days")
+  ownerResourceId String        @map("owner_resource_id") @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ownerResource Resource @relation("IssueOwner", fields: [ownerResourceId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, status, severity])
+  @@index([ownerResourceId])
+  @@map("issues")
+}
+
+model Dependency {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  predecessorTaskId String         @map("predecessor_task_id") @db.Uuid
+  successorTaskId   String         @map("successor_task_id") @db.Uuid
+  dependencyType    DependencyType @default(FINISH_TO_START) @map("dependency_type")
+  lagDays           Int            @default(0) @map("lag_days")
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  predecessorTask Task @relation("DependencyPredecessor", fields: [predecessorTaskId], references: [id], onDelete: Cascade)
+  successorTask   Task @relation("DependencySuccessor", fields: [successorTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([predecessorTaskId, successorTaskId])
+  @@index([predecessorTaskId])
+  @@index([successorTaskId])
+  @@map("dependencies")
+}
+
+model ChangeRequest {
+  id                        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId                 String         @map("project_id") @db.Uuid
+  crCode                    String         @unique @map("cr_code") @db.VarChar(50)
+  description               String         @db.Text
+  businessReason            String?        @map("business_reason") @db.Text
+  scheduleImpactDays        Int            @default(0) @map("schedule_impact_days")
+  costImpact                Decimal        @default(0.00) @map("cost_impact") @db.Decimal(14, 2)
+  approvalStatus            ApprovalStatus @default(DRAFT) @map("approval_status")
+  approverResourceId        String?        @map("approver_resource_id") @db.Uuid
+  isPotentialUnregisteredCr Boolean        @default(false) @map("is_potential_unregistered_cr")
+  createdAt                 DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approverResource Resource? @relation("ChangeRequestApprover", fields: [approverResourceId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, approvalStatus])
+  @@index([approverResourceId])
+  @@map("change_requests")
+}
+
+// ==========================================
+// MODULE 6: SYSTEM AUDIT & JOBS
+// ==========================================
+
+model SyncJob {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  connectorName    String        @map("connector_name") @db.VarChar(100)
+  status           SyncJobStatus @default(QUEUED)
+  startedAt        DateTime?     @map("started_at") @db.Timestamptz(6)
+  completedAt      DateTime?     @map("completed_at") @db.Timestamptz(6)
+  recordsProcessed Int           @default(0) @map("records_processed")
+  failedRecords    Int           @default(0) @map("failed_records")
+  errorDetails     Json?         @map("error_details")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([connectorName, status])
+  @@index([startedAt(sort: Desc)])
+  @@map("sync_jobs")
+}
+
+model AuditEvent {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType      AuditEventType @map("event_type")
+  actorUserId    String         @map("actor_user_id") @db.VarChar(255)
+  entityAffected String         @map("entity_affected") @db.VarChar(100)
+  entityId       String         @map("entity_id") @db.Uuid
+  sourceRecordId String?        @map("source_record_id") @db.Uuid
+  beforeState    Json?          @map("before_state")
+  afterState     Json?          @map("after_state")
+  userConfirmed  Boolean        @default(false) @map("user_confirmed")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceRecord SourceRecord? @relation(fields: [sourceRecordId], references: [id], onDelete: SetNull)
+
+  @@index([entityAffected, entityId])
+  @@index([sourceRecordId])
+  @@index([actorUserId])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_events")
+}
