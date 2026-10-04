@@ -1,15 +1,17 @@
 import 'dotenv/config'; // must stay the first import so env vars are loaded
-import express, { Application } from 'express';
 import cors from 'cors';
-import { connectDB, closeDB, prisma } from './config/db';
+import express, { Application } from 'express';
+import { closeDB, connectDB, prisma } from './config/db';
+import { env } from './config/env';
+import { errorHandler, notFoundHandler } from './lib/errors';
+import { logger } from './lib/logger';
+import { importsRouter } from './routes/imports';
 
 const app: Application = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Health check (also verifies database connectivity)
 app.get('/api/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`select 1`;
@@ -18,16 +20,21 @@ app.get('/api/health', async (_req, res) => {
     res.status(503).json({ status: 'API is running', database: 'unreachable' });
   }
 });
-const PORT = process.env.PORT || 5000;
+
+app.use('/api/imports', importsRouter);
+
+// These two must come last
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 const start = async () => {
-  await connectDB(); // wait for the DB before accepting traffic
-  const server = app.listen(PORT, () => {
-    console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  await connectDB();
+  const server = app.listen(env.PORT, () => {
+    logger.info(`Server running in ${env.NODE_ENV} mode on port ${env.PORT}`);
   });
 
-  const shutdown = async (signal: string) => {
-    console.log(`${signal} received, shutting down...`);
+  const shutdown = (signal: string) => {
+    logger.info(`${signal} received, shutting down...`);
     server.close(async () => {
       await closeDB();
       process.exit(0);
@@ -37,4 +44,4 @@ const start = async () => {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 };
 
-start();    
+start();
