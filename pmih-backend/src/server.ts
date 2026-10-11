@@ -6,6 +6,7 @@ import { env } from './config/env';
 import { errorHandler, notFoundHandler } from './lib/errors';
 import { logger } from './lib/logger';
 import { importsRouter } from './routes/imports';
+import { clientsRouter } from './routes/clients'
 
 const app: Application = express();
 
@@ -22,6 +23,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.use('/api/imports', importsRouter);
+app.use('/api/clients', clientsRouter); 
 
 // These two must come last
 app.use(notFoundHandler);
