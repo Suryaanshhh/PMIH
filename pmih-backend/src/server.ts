@@ -6,7 +6,10 @@ import { env } from './config/env';
 import { errorHandler, notFoundHandler } from './lib/errors';
 import { logger } from './lib/logger';
 import { importsRouter } from './routes/imports';
-import { clientsRouter } from './routes/clients'
+import { clientsRouter } from './routes/clients';
+import { projectsRouter } from './routes/projects';   
+import { resourcesRouter } from './routes/resources';
+import { allocationsRouter } from './routes/allocations'; 
 
 const app: Application = express();
 
@@ -24,6 +27,9 @@ app.get('/api/health', async (_req, res) => {
 
 app.use('/api/imports', importsRouter);
 app.use('/api/clients', clientsRouter); 
+app.use('/api/projects', projectsRouter); 
+app.use('/api/resources', resourcesRouter); 
+app.use('/api/allocations', allocationsRouter);
 
 // These two must come last
 app.use(notFoundHandler);
